@@ -9,23 +9,16 @@ export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const rawKey = process.env["DEEPSEEK_API_KEY"];
-        const apiKey = rawKey?.trim();
+        const apiKey = process.env["AI_API_KEY"]?.trim() ?? process.env["DEEPSEEK_API_KEY"]?.trim();
         if (!apiKey) {
           return new Response(
-            JSON.stringify({ error: "DEEPSEEK_API_KEY is not configured." }),
+            JSON.stringify({ error: "AI_API_KEY is not configured." }),
             { status: 500, headers: { "content-type": "application/json" } },
           );
         }
-        if (!apiKey.startsWith("sk-")) {
-          return new Response(
-            JSON.stringify({
-              error:
-                "The stored API key does not look like a DeepSeek key (it should start with sk-). If you have an OpenRouter key, please tell me so I can switch the endpoint.",
-            }),
-            { status: 401, headers: { "content-type": "application/json" } },
-          );
-        }
+
+        const baseUrl = (process.env["AI_BASE_URL"] ?? "https://api.b.ai/v1").replace(/\/$/, "");
+        const model = process.env["AI_MODEL"]?.trim() ?? "deepseek-v4-flash";
 
         const body = (await request.json()) as { messages?: ChatMessage[] };
         const messages = Array.isArray(body.messages) ? body.messages : null;
@@ -36,14 +29,14 @@ export const Route = createFileRoute("/api/chat")({
           });
         }
 
-        const upstream = await fetch("https://api.deepseek.com/chat/completions", {
+        const upstream = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: "deepseek-chat",
+            model,
             stream: true,
             temperature: 0.6,
             messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages.slice(-20)],
