@@ -29,6 +29,7 @@ export const Route = createFileRoute("/api/chat")({
           });
         }
 
+        console.log("[chat] calling", baseUrl, "model", model);
         const upstream = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
@@ -42,6 +43,7 @@ export const Route = createFileRoute("/api/chat")({
             messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages.slice(-20)],
           }),
         });
+        console.log("[chat] upstream status", upstream.status, "has body", !!upstream.body);
 
         if (!upstream.ok || !upstream.body) {
           const detail = await upstream.text().catch(() => "");
