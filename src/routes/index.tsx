@@ -68,25 +68,36 @@ function VelixChat() {
         }),
       });
 
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Request failed" }));
         throw new Error(data.error ?? "Request failed");
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
+      const type = res.headers.get("content-type") ?? "";
+      if (type.includes("application/json")) {
+        const data = (await res.json().catch(() => ({}))) as { content?: string };
+        if (!data.content) throw new Error("No response received");
         setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
+          prev.map((m) => (m.id === assistantId ? { ...m, content: data.content! } : m)),
         );
-      }
-      if (!acc) {
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-        setError("No response received. Please try again.");
+      } else if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
+          );
+        }
+        if (!acc) {
+          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          setError("No response received. Please try again.");
+        }
+      } else {
+        throw new Error("No response received");
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Something went wrong";
