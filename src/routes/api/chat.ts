@@ -9,11 +9,21 @@ export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const apiKey = process.env["DEEPSEEK_API_KEY"];
+        const rawKey = process.env["DEEPSEEK_API_KEY"];
+        const apiKey = rawKey?.trim();
         if (!apiKey) {
           return new Response(
             JSON.stringify({ error: "DEEPSEEK_API_KEY is not configured." }),
             { status: 500, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (!apiKey.startsWith("sk-")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "The stored API key does not look like a DeepSeek key (it should start with sk-). If you have an OpenRouter key, please tell me so I can switch the endpoint.",
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
           );
         }
 
