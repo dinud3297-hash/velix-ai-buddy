@@ -9,23 +9,16 @@ export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const rawKey = process.env["DEEPSEEK_API_KEY"];
-        const apiKey = rawKey?.trim();
+        const apiKey = process.env["AI_API_KEY"]?.trim() ?? process.env["DEEPSEEK_API_KEY"]?.trim();
         if (!apiKey) {
           return new Response(
-            JSON.stringify({ error: "DEEPSEEK_API_KEY is not configured." }),
+            JSON.stringify({ error: "AI_API_KEY is not configured." }),
             { status: 500, headers: { "content-type": "application/json" } },
           );
         }
-        if (!apiKey.startsWith("sk-")) {
-          return new Response(
-            JSON.stringify({
-              error:
-                "The stored API key does not look like a DeepSeek key (it should start with sk-). If you have an OpenRouter key, please tell me so I can switch the endpoint.",
-            }),
-            { status: 401, headers: { "content-type": "application/json" } },
-          );
-        }
+
+        const baseUrl = (process.env["AI_BASE_URL"] ?? "https://api.b.ai/v1").replace(/\/$/, "");
+        const model = process.env["AI_MODEL"]?.trim() ?? "deepseek-v4-flash";
 
         const body = (await request.json()) as { messages?: ChatMessage[] };
         const messages = Array.isArray(body.messages) ? body.messages : null;
@@ -36,21 +29,21 @@ export const Route = createFileRoute("/api/chat")({
           });
         }
 
-        const upstream = await fetch("https://api.deepseek.com/chat/completions", {
+        const upstream = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: "deepseek-chat",
-            stream: true,
+            model,
+            stream: false,
             temperature: 0.6,
             messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages.slice(-20)],
           }),
         });
 
-        if (!upstream.ok || !upstream.body) {
+        if (!upstream.ok) {
           const detail = await upstream.text().catch(() => "");
           return new Response(
             JSON.stringify({
@@ -60,45 +53,20 @@ export const Route = createFileRoute("/api/chat")({
           );
         }
 
-        const decoder = new TextDecoder();
-        const encoder = new TextEncoder();
-        const reader = upstream.body.getReader();
-        let buffer = "";
+        const json = (await upstream.json().catch(() => ({}))) as {
+          choices?: { message?: { content?: string } }[];
+          error?: { message?: string };
+        };
+        const content = json.choices?.[0]?.message?.content;
+        if (!content) {
+          return new Response(
+            JSON.stringify({ error: "No response from AI provider." }),
+            { status: 502, headers: { "content-type": "application/json" } },
+          );
+        }
 
-        const stream = new ReadableStream<Uint8Array>({
-          async pull(controller) {
-            const { done, value } = await reader.read();
-            if (done) {
-              controller.close();
-              return;
-            }
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith("data:")) continue;
-              const data = trimmed.slice(5).trim();
-              if (data === "[DONE]") continue;
-              try {
-                const json = JSON.parse(data);
-                const delta = json?.choices?.[0]?.delta?.content;
-                if (delta) controller.enqueue(encoder.encode(delta));
-              } catch {
-                // ignore partial/keepalive frames
-              }
-            }
-          },
-          cancel(reason) {
-            return reader.cancel(reason);
-          },
-        });
-
-        return new Response(stream, {
-          headers: {
-            "content-type": "text/plain; charset=utf-8",
-            "cache-control": "no-cache",
-          },
+        return new Response(JSON.stringify({ content }), {
+          headers: { "content-type": "application/json" },
         });
       },
     },
