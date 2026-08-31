@@ -28,7 +28,7 @@ export const Route = createFileRoute("/api/chat")({
         const baseUrl = (process.env["AI_BASE_URL"] ?? "https://api.b.ai/v1").replace(/\/$/, "");
         const model = process.env["AI_MODEL"]?.trim() ?? "deepseek-v4-flash";
 
-        const body = (await request.json()) as { messages?: ChatMessage[] };
+        const body = (await request.json()) as { messages?: ChatMessage[]; mode?: string };
         const messages = Array.isArray(body.messages) ? body.messages : null;
         if (!messages || messages.length === 0) {
           return new Response(JSON.stringify({ error: "messages are required" }), {
@@ -36,6 +36,8 @@ export const Route = createFileRoute("/api/chat")({
             headers: { "content-type": "application/json" },
           });
         }
+
+        const isBuilder = body.mode === "builder";
 
         const upstream = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
@@ -46,10 +48,15 @@ export const Route = createFileRoute("/api/chat")({
           body: JSON.stringify({
             model,
             stream: false,
-            temperature: 0.6,
-            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages.slice(-20)],
+            temperature: isBuilder ? 0.4 : 0.6,
+            max_tokens: isBuilder ? 8000 : 2000,
+            messages: [
+              { role: "system", content: isBuilder ? BUILDER_PROMPT : SYSTEM_PROMPT },
+              ...messages.slice(-20),
+            ],
           }),
         });
+
 
         if (!upstream.ok) {
           const detail = await upstream.text().catch(() => "");
