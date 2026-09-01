@@ -32,6 +32,20 @@ const JS_MIME = "text/javascript";
 
 const ERROR_HOOK = `<script>
 (function(){
+  // sandboxed iframes have an opaque origin: storage access throws, so shim it.
+  try { window.localStorage.getItem('__velix'); } catch (err) {
+    var store = {};
+    var shim = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+      setItem: function(k, v){ store[k] = String(v); },
+      removeItem: function(k){ delete store[k]; },
+      clear: function(){ store = {}; },
+      key: function(i){ return Object.keys(store)[i] || null; },
+      get length(){ return Object.keys(store).length; }
+    };
+    try { Object.defineProperty(window, 'localStorage', { value: shim, configurable: true }); } catch (e2) {}
+    try { Object.defineProperty(window, 'sessionStorage', { value: shim, configurable: true }); } catch (e3) {}
+  }
   function post(kind, message, stack){
     try { parent.postMessage({ __velix: true, kind: kind, message: String(message||''), stack: String(stack||'') }, '*'); } catch(e){}
   }
