@@ -1,7 +1,7 @@
 export type ProjectFile = { path: string; content: string };
 export type Project = {
   name: string;
-  summary?: string;
+  summary: string;
   entry: string;
   files: ProjectFile[];
 };
@@ -169,13 +169,16 @@ export function parseProject(raw: string): Project {
   let files: ProjectFile[] = [];
   if (Array.isArray(parsed.files)) files = parsed.files.filter((f) => f && f.path);
   else if (parsed.files && typeof parsed.files === "object")
-    files = Object.entries(parsed.files).map(([path, content]) => ({ path, content }));
+    files = Object.entries(parsed.files).map(([path, content]) => ({
+      path,
+      content: String(content),
+    }));
 
   if (files.length === 0) throw new Error("The generated project had no files.");
 
   return {
     name: parsed.name || "velix-app",
-    summary: parsed.summary,
+    summary: parsed.summary ?? "",
     entry: parsed.entry || "index.html",
     files,
   };
