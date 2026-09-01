@@ -154,32 +154,74 @@ export function buildTree(files: ProjectFile[]): TreeNode[] {
   return sort(root);
 }
 
+/** Repair a JSON object that was cut off mid-generation. */
+function repairJson(text: string): string {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  let out = text;
+  if (inString) out += '"';
+  out = out.replace(/,\s*$/, "");
+  while (stack.length) out += stack.pop() === "{" ? "}" : "]";
+  return out;
+}
+
 /** Extract a JSON project object from a model reply that may contain noise. */
 export function parseProject(raw: string): Project {
   let text = raw.trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  if (fenced?.[1]) text = fenced[1].trim();
+  if (fenced?.[1] && fenced[1].trim().startsWith("{")) text = fenced[1].trim();
+
   const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("Model did not return a project.");
-  const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<Project> & {
-    files?: ProjectFile[] | Record<string, string>;
-  };
+  let parsed: (Partial<Project> & { files?: ProjectFile[] | Record<string, string> }) | null = null;
+
+  if (start !== -1) {
+    const body = text.slice(start);
+    const candidates = [body.slice(0, body.lastIndexOf("}") + 1), repairJson(body)];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        parsed = JSON.parse(candidate);
+        break;
+      } catch {
+        /* try the next candidate */
+      }
+    }
+  }
 
   let files: ProjectFile[] = [];
-  if (Array.isArray(parsed.files)) files = parsed.files.filter((f) => f && f.path);
-  else if (parsed.files && typeof parsed.files === "object")
+  if (Array.isArray(parsed?.files))
+    files = parsed.files.filter((f) => f && f.path && typeof f.content === "string");
+  else if (parsed?.files && typeof parsed.files === "object")
     files = Object.entries(parsed.files).map(([path, content]) => ({
       path,
       content: String(content),
     }));
 
-  if (files.length === 0) throw new Error("The generated project had no files.");
+  // Fallback: the model returned raw HTML instead of a JSON project.
+  if (files.length === 0) {
+    const html =
+      /<!DOCTYPE html[\s\S]*<\/html>/i.exec(raw)?.[0] ?? (/^\s*<[\s\S]+>/.test(raw) ? raw : "");
+    if (html.trim()) files = [{ path: "index.html", content: html.trim() }];
+  }
+
+  if (files.length === 0) throw new Error("Model did not return a project. Try sending again.");
 
   return {
-    name: parsed.name || "velix-app",
-    summary: parsed.summary ?? "",
-    entry: parsed.entry || "index.html",
+    name: parsed?.name || "velix-app",
+    summary: parsed?.summary ?? "",
+    entry: parsed?.entry || "index.html",
     files,
   };
 }
