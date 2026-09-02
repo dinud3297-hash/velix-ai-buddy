@@ -98,7 +98,7 @@ export const Route = createFileRoute("/api/chat")({
           }),
         });
 
-        if (!upstream.ok || !upstream.body) {
+        if (!upstream.ok) {
           const detail = await upstream.text().catch(() => "");
           return new Response(
             JSON.stringify({
@@ -108,53 +108,7 @@ export const Route = createFileRoute("/api/chat")({
           );
         }
 
-        if (!isBuilder) {
-          // Re-emit only the plain text deltas as a raw text stream: simplest possible
-          // transport for the browser and it starts painting on the first token.
-          const decoder = new TextDecoder();
-          const encoder = new TextEncoder();
-          const reader = upstream.body.getReader();
-          let buffer = "";
 
-          const stream = new ReadableStream<Uint8Array>({
-            async pull(controller) {
-              const { done, value } = await reader.read();
-              if (done) {
-                controller.close();
-                return;
-              }
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith("data:")) continue;
-                const payload = trimmed.slice(5).trim();
-                if (!payload || payload === "[DONE]") continue;
-                try {
-                  const json = JSON.parse(payload) as {
-                    choices?: { delta?: { content?: string } }[];
-                  };
-                  const delta = json.choices?.[0]?.delta?.content;
-                  if (delta) controller.enqueue(encoder.encode(delta));
-                } catch {
-                  /* ignore keep-alive / partial frames */
-                }
-              }
-            },
-            cancel() {
-              void reader.cancel();
-            },
-          });
-
-          return new Response(stream, {
-            headers: {
-              "content-type": "text/plain; charset=utf-8",
-              "cache-control": "no-cache",
-              "x-accel-buffering": "no",
-            },
-          });
-        }
 
         const json = (await upstream.json().catch(() => ({}))) as {
           choices?: { message?: { content?: string } }[];
