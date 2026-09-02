@@ -159,7 +159,7 @@ function VelixApp() {
     [project, activeFile],
   );
 
-  const callApi = useCallback(async (history: { role: string; content: string }[], m: Mode) => {
+  const callApi = useCallback(async (history: ApiMsg[], m: Mode) => {
     const controller = new AbortController();
     abortRef.current = controller;
     const res = await fetch("/api/chat", {
@@ -174,19 +174,46 @@ function VelixApp() {
     return data.content;
   }, []);
 
+  async function addImages(list: FileList | null) {
+    if (!list?.length) return;
+    const picked = Array.from(list).slice(0, 4 - images.length);
+    const encoded = await Promise.all(
+      picked.filter((f) => f.type.startsWith("image/")).map(toCompressedDataUrl),
+    );
+    setImages((prev) => [...prev, ...encoded].slice(0, 4));
+  }
+
   async function sendChat(text: string) {
     const content = text.trim();
-    if (!content || busy) return;
+    const attached = images;
+    if ((!content && attached.length === 0) || busy) return;
     setError(null);
-    const userMsg: Msg = { id: crypto.randomUUID(), role: "user", content };
+    const prompt = content || "Scan this image and tell me everything it contains.";
+    const userMsg: Msg = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      ...(attached.length ? { images: attached } : {}),
+    };
     const assistantId = crypto.randomUUID();
     const history = [...messages, userMsg];
     setMessages([...history, { id: assistantId, role: "assistant", content: "" }]);
     setInput("");
+    setImages([]);
     setBusy(true);
     try {
       const reply = await callApi(
-        history.map((m) => ({ role: m.role, content: m.content })),
+        history.map((m) =>
+          m.images?.length
+            ? {
+                role: m.role,
+                content: [
+                  { type: "text", text: m.content },
+                  ...m.images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+                ] as Part[],
+              }
+            : { role: m.role, content: m.content },
+        ),
         "chat",
       );
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: reply } : m)));
@@ -199,6 +226,8 @@ function VelixApp() {
       abortRef.current = null;
     }
   }
+
+
 
   async function build(instruction: string, opts: { silent?: boolean } = {}) {
     const content = instruction.trim();
