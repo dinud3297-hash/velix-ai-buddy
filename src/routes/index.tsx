@@ -310,29 +310,50 @@ function VelixApp() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const suggestions = mode === "chat" ? CHAT_SUGGESTIONS : BUILD_SUGGESTIONS;
+  const suggestions =
+    mode === "chat" ? CHAT_SUGGESTIONS : mode === "web" ? WEB_SUGGESTIONS : BUILD_SUGGESTIONS;
+
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    // App projects and website projects are different artifacts — start clean.
+    if (next !== "chat" && mode !== "chat") {
+      setProject(null);
+      setBuildLog([]);
+      setRuntimeErrors([]);
+    }
+    setError(null);
+    setMode(next);
+  }
 
   return (
     <main className="flex min-h-dvh flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-xl">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-72 bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklab,var(--color-primary)_22%,transparent),transparent_70%)]"
+      />
+      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-3">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-primary shadow-[0_0_24px_-6px_var(--color-primary)]">
+          <div className="flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-chart-2 shadow-[0_10px_30px_-10px_var(--color-primary)]">
             <Sparkles className="size-5 text-primary-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold tracking-tight">Velix AI</h1>
+            <h1 className="truncate bg-gradient-to-r from-foreground to-primary bg-clip-text text-base font-semibold tracking-tight text-transparent">
+              Velix AI
+            </h1>
             <p className="truncate text-xs text-muted-foreground">
               {mode === "chat"
-                ? "Always-on AI assistant"
+                ? "Fast assistant · photo scan"
                 : project
                   ? `${project.name} · ${project.files.length} files`
-                  : "Real-time no-code app builder"}
+                  : mode === "web"
+                    ? "No-code website builder"
+                    : "Real-time no-code app builder"}
             </p>
           </div>
-          {mode === "builder" && project && (
+          {mode !== "chat" && project && (
             <button
               onClick={() => setDeployOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+              className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-[0_8px_24px_-12px_var(--color-primary)] transition-transform active:scale-95"
             >
               <Rocket className="size-3.5" /> Deploy
             </button>
@@ -345,28 +366,35 @@ function VelixApp() {
                 setBuildLog([]);
                 setRuntimeErrors([]);
                 setError(null);
+                setImages([]);
               }}
               aria-label="Clear"
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <Trash2 className="size-4" />
             </button>
           )}
         </div>
         <div className="mx-auto w-full max-w-7xl px-4 pb-3">
-          <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {(["chat", "builder"] as Mode[]).map((m) => (
+          <div className="flex gap-1 rounded-2xl border border-border bg-card/70 p-1 shadow-sm">
+            {(
+              [
+                ["chat", MessageSquare, "Chat"],
+                ["builder", Wand2, "App"],
+                ["web", Globe, "Website"],
+              ] as [Mode, typeof Globe, string][]
+            ).map(([m, Icon, label]) => (
               <button
                 key={m}
-                onClick={() => setMode(m)}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                onClick={() => switchMode(m)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium transition-all ${
                   mode === m
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-primary text-primary-foreground shadow-[0_8px_24px_-14px_var(--color-primary)]"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
                 }`}
               >
-                {m === "chat" ? <MessageSquare className="size-4" /> : <Wand2 className="size-4" />}
-                {m === "chat" ? "Chat" : "No-Code"}
+                <Icon className="size-4" />
+                {label}
               </button>
             ))}
           </div>
@@ -378,7 +406,7 @@ function VelixApp() {
           messages.length === 0 ? (
             <Empty
               title="How can I help you?"
-              subtitle="Ask anything — code, ideas, translations, or explanations."
+              subtitle="Ask anything, or upload a photo and Velix will scan it for text, objects and details."
               suggestions={suggestions}
               onPick={(s) => void sendChat(s)}
             />
@@ -389,10 +417,22 @@ function VelixApp() {
                   <div
                     className={
                       m.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground"
-                        : "max-w-[92%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-card-foreground"
+                        ? "max-w-[85%] space-y-2 rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_10px_30px_-18px_var(--color-primary)]"
+                        : "max-w-[92%] rounded-2xl rounded-bl-md border border-border bg-card/80 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-card-foreground shadow-sm"
                     }
                   >
+                    {m.images?.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {m.images.map((src) => (
+                          <img
+                            key={src.slice(-24)}
+                            src={src}
+                            alt="Attached upload scanned by Velix AI"
+                            className="size-24 rounded-xl object-cover"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                     {m.content || <span className="text-muted-foreground">Thinking…</span>}
                   </div>
                 </div>
@@ -401,8 +441,12 @@ function VelixApp() {
           )
         ) : !project && !busy ? (
           <Empty
-            title="Describe your app"
-            subtitle="Velix generates a real multi-file project — any framework — and previews it live while it builds."
+            title={mode === "web" ? "Describe your website" : "Describe your app"}
+            subtitle={
+              mode === "web"
+                ? "Velix builds a full multi-page website — pages, navigation, responsive design — and previews it live."
+                : "Velix generates a real multi-file project — any framework — and previews it live while it builds."
+            }
             suggestions={suggestions}
             onPick={(s) => void build(s)}
           />
