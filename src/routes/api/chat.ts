@@ -86,12 +86,15 @@ export const Route = createFileRoute("/api/chat")({
           },
           body: JSON.stringify({
             model,
-            // Streaming makes chat answers appear almost instantly; builder stays buffered
-            // because the client needs the whole JSON project before it can parse it.
-            stream: !isBuilder,
+            // Buffered on purpose: the hosting runtime does not forward SSE reliably.
+            // Speed comes from a tight token budget and a short history window instead.
+            stream: false,
             temperature: isBuilder ? 0.3 : 0.5,
-            max_tokens: isBuilder ? 16000 : 1200,
-            messages: [{ role: "system", content: system }, ...messages.slice(-14)],
+            max_tokens: isBuilder ? 16000 : 900,
+            messages: [
+              { role: "system", content: system },
+              ...messages.slice(isBuilder ? -14 : -8),
+            ],
           }),
         });
 
