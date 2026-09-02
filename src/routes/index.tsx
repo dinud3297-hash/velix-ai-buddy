@@ -241,7 +241,7 @@ function VelixApp() {
       setBuildLog((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content }]);
 
     try {
-      const history: { role: string; content: string }[] = [];
+      const history: ApiMsg[] = [];
       if (project) {
         history.push({ role: "user", content: "Current project" });
         history.push({ role: "assistant", content: JSON.stringify(project) });
@@ -253,8 +253,8 @@ function VelixApp() {
         history.push({ role: "user", content });
       }
 
-      setStatus("Generating files…");
-      const reply = await callApi(history, "builder");
+      setStatus(mode === "web" ? "Designing pages…" : "Generating files…");
+      const reply = await callApi(history, mode === "web" ? "web" : "builder");
       setStatus("Wiring up the live preview…");
       const next = parseProject(reply);
       setProject(next);
