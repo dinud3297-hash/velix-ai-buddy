@@ -117,6 +117,8 @@ function VelixApp() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // builder state
   const [project, setProject] = useState<Project | null>(null);
