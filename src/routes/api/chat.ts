@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+type Part =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+type ChatMessage = { role: "user" | "assistant" | "system"; content: string | Part[] };
 
 const SYSTEM_PROMPT =
-  "You are Velix AI, a helpful, precise assistant created by Velix. If anyone asks who made you, who your creator/developer/owner is, always answer that you were created by Velix. Never mention any other company or model provider. Answer accurately and concisely. If the user writes in Sinhala, reply in Sinhala.";
+  "You are Velix AI, a helpful, precise assistant created by Velix. If anyone asks who made you, who your creator/developer/owner is, always answer that you were created by Velix. Never mention any other company or model provider. Answer accurately and concisely. If the user writes in Sinhala, reply in Sinhala. When an image is attached, scan it carefully and describe or extract exactly what is in it (text, objects, numbers, code, documents) before answering.";
 
 const BUILDER_PROMPT = `You are Velix AI No-Code Builder, created by Velix. If anyone asks who made you, answer: Velix.
 The user describes an app in plain language (English or Sinhala). You generate a COMPLETE, PRODUCTION-QUALITY, MULTI-FILE web project.
@@ -30,6 +33,22 @@ HARD RULES
 7. Every file you list must be complete. JSON must be strictly valid — escape newlines and quotes correctly inside "content".
 8. When the user asks for a change, or when runtime errors are reported, return the FULL updated project again (all files), fixing the reported errors.`;
 
+const WEB_PROMPT = `You are Velix AI Website Builder, created by Velix. If anyone asks who made you, answer: Velix.
+The user describes a WEBSITE in plain language (English or Sinhala). You generate a complete, marketing-grade, MULTI-PAGE static website.
+
+Use the exact same JSON output format and the same hard rules as the Velix app builder:
+{ "name": "...", "summary": "...", "entry": "index.html", "files": [ { "path": "...", "content": "..." } ] }
+Return ONLY raw JSON — no markdown fences, no commentary.
+
+WEBSITE-SPECIFIC RULES
+1. Produce real multi-page navigation: index.html plus pages like about.html, services.html, pricing.html, blog.html, contact.html — whichever fit the brief. Every nav link must point to a page you actually generated (relative paths only).
+2. Shared styles/main.css and src/main.js across all pages; identical header and footer on each page with the current page highlighted.
+3. Each page needs a unique <title>, meta description, Open Graph tags, one H1, semantic sections, and alt text on every image.
+4. Design bar: distinctive modern visual identity (custom palette, Google Font pairing, generous spacing, gradients/glass/soft shadows used tastefully), hero with clear value proposition, feature grid, testimonials, FAQ accordion, pricing table, call-to-action band, real footer. Fully responsive with a working mobile hamburger menu.
+5. Interactions must work: mobile menu toggle, smooth scroll, accordion, contact form validation with success state, scroll reveal animations, back-to-top.
+6. Realistic industry-specific copy and images from https://images.unsplash.com — no lorem ipsum, no placeholder text, no dead links.
+7. When the user asks for a change, return the FULL updated site again (all files).`;
+
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
@@ -55,7 +74,9 @@ export const Route = createFileRoute("/api/chat")({
           });
         }
 
-        const isBuilder = body.mode === "builder";
+        const mode = body.mode === "builder" ? "builder" : body.mode === "web" ? "web" : "chat";
+        const isBuilder = mode !== "chat";
+        const system = mode === "builder" ? BUILDER_PROMPT : mode === "web" ? WEB_PROMPT : SYSTEM_PROMPT;
 
         const upstream = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
@@ -65,12 +86,14 @@ export const Route = createFileRoute("/api/chat")({
           },
           body: JSON.stringify({
             model,
+            // Buffered on purpose: the hosting runtime does not forward SSE reliably.
+            // Speed comes from a tight token budget and a short history window instead.
             stream: false,
-            temperature: isBuilder ? 0.3 : 0.6,
-            max_tokens: isBuilder ? 16000 : 2000,
+            temperature: isBuilder ? 0.3 : 0.5,
+            max_tokens: isBuilder ? 16000 : 900,
             messages: [
-              { role: "system", content: isBuilder ? BUILDER_PROMPT : SYSTEM_PROMPT },
-              ...messages.slice(-14),
+              { role: "system", content: system },
+              ...messages.slice(isBuilder ? -14 : -8),
             ],
           }),
         });
@@ -81,9 +104,11 @@ export const Route = createFileRoute("/api/chat")({
             JSON.stringify({
               error: `AI provider error (${upstream.status}). ${detail.slice(0, 300)}`,
             }),
-            { status: upstream.status, headers: { "content-type": "application/json" } },
+            { status: upstream.status || 502, headers: { "content-type": "application/json" } },
           );
         }
+
+
 
         const json = (await upstream.json().catch(() => ({}))) as {
           choices?: { message?: { content?: string } }[];

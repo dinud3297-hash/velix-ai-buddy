@@ -11,11 +11,14 @@ import {
   Eye,
   FileCode2,
   Folder,
+  Globe,
+  ImagePlus,
   Loader2,
   MessageSquare,
   Monitor,
   RefreshCw,
   Rocket,
+  ScanLine,
   Smartphone,
   Sparkles,
   Square,
@@ -50,15 +53,17 @@ export const Route = createFileRoute("/")({
   component: VelixApp,
 });
 
-type Msg = { id: string; role: "user" | "assistant"; content: string };
-type Mode = "chat" | "builder";
+type Msg = { id: string; role: "user" | "assistant"; content: string; images?: string[] };
+type Mode = "chat" | "builder" | "web";
 type Pane = "preview" | "code" | "chat";
 type Device = "mobile" | "tablet" | "desktop";
 type RuntimeError = { message: string; stack: string };
+type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ApiMsg = { role: string; content: string | Part[] };
 
 const CHAT_SUGGESTIONS = [
   "Explain quantum computing simply",
-  "Write a short poem about the sea",
+  "Scan this photo and extract all the text",
   "සිංහලෙන් කෙටි කතාවක් ලියන්න",
   "Debug my JavaScript function",
 ];
@@ -69,6 +74,27 @@ const BUILD_SUGGESTIONS = [
   "සිංහල notes app එකක් local storage එක්ක",
   "A realtime chat UI like Facebook Messenger",
 ];
+
+const WEB_SUGGESTIONS = [
+  "A multi-page agency website with pricing and blog",
+  "Restaurant website with menu, gallery and booking",
+  "සිංහල ව්‍යාපාරික website එකක් contact form එක්ක",
+  "SaaS landing site with FAQ and testimonials",
+];
+
+const MAX_IMAGE_EDGE = 1400;
+
+/** Downscale + JPEG-encode an upload so vision requests stay small and fast. */
+async function toCompressedDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
 
 const DEVICE_WIDTH: Record<Device, string> = {
   mobile: "390px",
@@ -91,6 +117,8 @@ function VelixApp() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // builder state
   const [project, setProject] = useState<Project | null>(null);
@@ -131,7 +159,7 @@ function VelixApp() {
     [project, activeFile],
   );
 
-  const callApi = useCallback(async (history: { role: string; content: string }[], m: Mode) => {
+  const callApi = useCallback(async (history: ApiMsg[], m: Mode) => {
     const controller = new AbortController();
     abortRef.current = controller;
     const res = await fetch("/api/chat", {
@@ -146,19 +174,46 @@ function VelixApp() {
     return data.content;
   }, []);
 
+  async function addImages(list: FileList | null) {
+    if (!list?.length) return;
+    const picked = Array.from(list).slice(0, 4 - images.length);
+    const encoded = await Promise.all(
+      picked.filter((f) => f.type.startsWith("image/")).map(toCompressedDataUrl),
+    );
+    setImages((prev) => [...prev, ...encoded].slice(0, 4));
+  }
+
   async function sendChat(text: string) {
     const content = text.trim();
-    if (!content || busy) return;
+    const attached = images;
+    if ((!content && attached.length === 0) || busy) return;
     setError(null);
-    const userMsg: Msg = { id: crypto.randomUUID(), role: "user", content };
+    const prompt = content || "Scan this image and tell me everything it contains.";
+    const userMsg: Msg = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      ...(attached.length ? { images: attached } : {}),
+    };
     const assistantId = crypto.randomUUID();
     const history = [...messages, userMsg];
     setMessages([...history, { id: assistantId, role: "assistant", content: "" }]);
     setInput("");
+    setImages([]);
     setBusy(true);
     try {
       const reply = await callApi(
-        history.map((m) => ({ role: m.role, content: m.content })),
+        history.map((m) =>
+          m.images?.length
+            ? {
+                role: m.role,
+                content: [
+                  { type: "text", text: m.content },
+                  ...m.images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+                ] as Part[],
+              }
+            : { role: m.role, content: m.content },
+        ),
         "chat",
       );
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: reply } : m)));
@@ -172,6 +227,8 @@ function VelixApp() {
     }
   }
 
+
+
   async function build(instruction: string, opts: { silent?: boolean } = {}) {
     const content = instruction.trim();
     if (!content || busy) return;
@@ -184,7 +241,7 @@ function VelixApp() {
       setBuildLog((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content }]);
 
     try {
-      const history: { role: string; content: string }[] = [];
+      const history: ApiMsg[] = [];
       if (project) {
         history.push({ role: "user", content: "Current project" });
         history.push({ role: "assistant", content: JSON.stringify(project) });
@@ -196,8 +253,8 @@ function VelixApp() {
         history.push({ role: "user", content });
       }
 
-      setStatus("Generating files…");
-      const reply = await callApi(history, "builder");
+      setStatus(mode === "web" ? "Designing pages…" : "Generating files…");
+      const reply = await callApi(history, mode === "web" ? "web" : "builder");
       setStatus("Wiring up the live preview…");
       const next = parseProject(reply);
       setProject(next);
@@ -253,29 +310,50 @@ function VelixApp() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const suggestions = mode === "chat" ? CHAT_SUGGESTIONS : BUILD_SUGGESTIONS;
+  const suggestions =
+    mode === "chat" ? CHAT_SUGGESTIONS : mode === "web" ? WEB_SUGGESTIONS : BUILD_SUGGESTIONS;
+
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    // App projects and website projects are different artifacts — start clean.
+    if (next !== "chat" && mode !== "chat") {
+      setProject(null);
+      setBuildLog([]);
+      setRuntimeErrors([]);
+    }
+    setError(null);
+    setMode(next);
+  }
 
   return (
     <main className="flex min-h-dvh flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-xl">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-72 bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklab,var(--color-primary)_22%,transparent),transparent_70%)]"
+      />
+      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-3">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-primary shadow-[0_0_24px_-6px_var(--color-primary)]">
+          <div className="flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-chart-2 shadow-[0_10px_30px_-10px_var(--color-primary)]">
             <Sparkles className="size-5 text-primary-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold tracking-tight">Velix AI</h1>
+            <h1 className="truncate bg-gradient-to-r from-foreground to-primary bg-clip-text text-base font-semibold tracking-tight text-transparent">
+              Velix AI
+            </h1>
             <p className="truncate text-xs text-muted-foreground">
               {mode === "chat"
-                ? "Always-on AI assistant"
+                ? "Fast assistant · photo scan"
                 : project
                   ? `${project.name} · ${project.files.length} files`
-                  : "Real-time no-code app builder"}
+                  : mode === "web"
+                    ? "No-code website builder"
+                    : "Real-time no-code app builder"}
             </p>
           </div>
-          {mode === "builder" && project && (
+          {mode !== "chat" && project && (
             <button
               onClick={() => setDeployOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+              className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-[0_8px_24px_-12px_var(--color-primary)] transition-transform active:scale-95"
             >
               <Rocket className="size-3.5" /> Deploy
             </button>
@@ -288,28 +366,35 @@ function VelixApp() {
                 setBuildLog([]);
                 setRuntimeErrors([]);
                 setError(null);
+                setImages([]);
               }}
               aria-label="Clear"
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <Trash2 className="size-4" />
             </button>
           )}
         </div>
         <div className="mx-auto w-full max-w-7xl px-4 pb-3">
-          <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {(["chat", "builder"] as Mode[]).map((m) => (
+          <div className="flex gap-1 rounded-2xl border border-border bg-card/70 p-1 shadow-sm">
+            {(
+              [
+                ["chat", MessageSquare, "Chat"],
+                ["builder", Wand2, "App"],
+                ["web", Globe, "Website"],
+              ] as [Mode, typeof Globe, string][]
+            ).map(([m, Icon, label]) => (
               <button
                 key={m}
-                onClick={() => setMode(m)}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                onClick={() => switchMode(m)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium transition-all ${
                   mode === m
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-primary text-primary-foreground shadow-[0_8px_24px_-14px_var(--color-primary)]"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
                 }`}
               >
-                {m === "chat" ? <MessageSquare className="size-4" /> : <Wand2 className="size-4" />}
-                {m === "chat" ? "Chat" : "No-Code"}
+                <Icon className="size-4" />
+                {label}
               </button>
             ))}
           </div>
@@ -321,7 +406,7 @@ function VelixApp() {
           messages.length === 0 ? (
             <Empty
               title="How can I help you?"
-              subtitle="Ask anything — code, ideas, translations, or explanations."
+              subtitle="Ask anything, or upload a photo and Velix will scan it for text, objects and details."
               suggestions={suggestions}
               onPick={(s) => void sendChat(s)}
             />
@@ -332,10 +417,22 @@ function VelixApp() {
                   <div
                     className={
                       m.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground"
-                        : "max-w-[92%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-card-foreground"
+                        ? "max-w-[85%] space-y-2 rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-[0_10px_30px_-18px_var(--color-primary)]"
+                        : "max-w-[92%] rounded-2xl rounded-bl-md border border-border bg-card/80 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-card-foreground shadow-sm"
                     }
                   >
+                    {m.images?.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {m.images.map((src) => (
+                          <img
+                            key={src.slice(-24)}
+                            src={src}
+                            alt="Attached upload scanned by Velix AI"
+                            className="size-24 rounded-xl object-cover"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                     {m.content || <span className="text-muted-foreground">Thinking…</span>}
                   </div>
                 </div>
@@ -344,8 +441,12 @@ function VelixApp() {
           )
         ) : !project && !busy ? (
           <Empty
-            title="Describe your app"
-            subtitle="Velix generates a real multi-file project — any framework — and previews it live while it builds."
+            title={mode === "web" ? "Describe your website" : "Describe your app"}
+            subtitle={
+              mode === "web"
+                ? "Velix builds a full multi-page website — pages, navigation, responsive design — and previews it live."
+                : "Velix generates a real multi-file project — any framework — and previews it live while it builds."
+            }
             suggestions={suggestions}
             onPick={(s) => void build(s)}
           />
