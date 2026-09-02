@@ -53,15 +53,17 @@ export const Route = createFileRoute("/")({
   component: VelixApp,
 });
 
-type Msg = { id: string; role: "user" | "assistant"; content: string };
-type Mode = "chat" | "builder";
+type Msg = { id: string; role: "user" | "assistant"; content: string; images?: string[] };
+type Mode = "chat" | "builder" | "web";
 type Pane = "preview" | "code" | "chat";
 type Device = "mobile" | "tablet" | "desktop";
 type RuntimeError = { message: string; stack: string };
+type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ApiMsg = { role: string; content: string | Part[] };
 
 const CHAT_SUGGESTIONS = [
   "Explain quantum computing simply",
-  "Write a short poem about the sea",
+  "Scan this photo and extract all the text",
   "සිංහලෙන් කෙටි කතාවක් ලියන්න",
   "Debug my JavaScript function",
 ];
@@ -72,6 +74,27 @@ const BUILD_SUGGESTIONS = [
   "සිංහල notes app එකක් local storage එක්ක",
   "A realtime chat UI like Facebook Messenger",
 ];
+
+const WEB_SUGGESTIONS = [
+  "A multi-page agency website with pricing and blog",
+  "Restaurant website with menu, gallery and booking",
+  "සිංහල ව්‍යාපාරික website එකක් contact form එක්ක",
+  "SaaS landing site with FAQ and testimonials",
+];
+
+const MAX_IMAGE_EDGE = 1400;
+
+/** Downscale + JPEG-encode an upload so vision requests stay small and fast. */
+async function toCompressedDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
 
 const DEVICE_WIDTH: Record<Device, string> = {
   mobile: "390px",
