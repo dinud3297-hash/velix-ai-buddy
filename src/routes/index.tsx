@@ -174,14 +174,37 @@ function VelixApp() {
     return data.content;
   }, []);
 
+  function readAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Could not read the image."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function addImages(list: FileList | null) {
     if (!list?.length) return;
-    const picked = Array.from(list).slice(0, 4 - images.length);
-    const encoded = await Promise.all(
-      picked.filter((f) => f.type.startsWith("image/")).map(toCompressedDataUrl),
-    );
-    setImages((prev) => [...prev, ...encoded].slice(0, 4));
+    const picked = Array.from(list)
+      .filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|heic)$/i.test(f.name))
+      .slice(0, 4 - images.length);
+    if (picked.length === 0) return;
+    try {
+      const encoded = await Promise.all(
+        picked.map(async (f) => {
+          try {
+            return await toCompressedDataUrl(f);
+          } catch {
+            return await readAsDataUrl(f);
+          }
+        }),
+      );
+      setImages((prev) => [...prev, ...encoded.filter((u) => u.startsWith("data:image"))].slice(0, 4));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not attach that image.");
+    }
   }
+
 
   async function sendChat(text: string) {
     const content = text.trim();
@@ -618,47 +641,95 @@ function VelixApp() {
             e.preventDefault();
             submit();
           }}
-          className="mx-auto flex w-full max-w-7xl items-end gap-2 px-4 py-3"
+          className="mx-auto w-full max-w-7xl px-4 py-3"
         >
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={1}
-            placeholder={
-              mode === "chat"
-                ? "Message Velix AI…"
-                : project
-                  ? "Describe a change — Velix rebuilds it live…"
-                  : "Describe the app you want to build…"
-            }
-            className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
-          />
-          {busy ? (
-            <button
-              type="button"
-              onClick={() => abortRef.current?.abort()}
-              aria-label="Stop"
-              className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground"
-            >
-              <Square className="size-4" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              aria-label={mode === "chat" ? "Send message" : "Build app"}
-              className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
-            >
-              {mode === "chat" ? <ArrowUp className="size-5" /> : <Wand2 className="size-5" />}
-            </button>
+          {mode === "chat" && images.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {images.map((src, i) => (
+                <div key={src.slice(-24) + i} className="relative">
+                  <img
+                    src={src}
+                    alt={`Attachment ${i + 1}`}
+                    className="size-16 rounded-xl border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove image"
+                    onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-secondary text-secondary-foreground shadow"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void addImages(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {mode === "chat" && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label="Upload or scan a photo"
+                title="Upload / scan a photo"
+                className="flex size-11 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ImagePlus className="size-5" />
+              </button>
+            )}
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder={
+                mode === "chat"
+                  ? images.length
+                    ? "Ask about the photo, or send to scan it…"
+                    : "Message Velix AI…"
+                  : project
+                    ? "Describe a change — Velix rebuilds it live…"
+                    : "Describe the app you want to build…"
+              }
+              className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
+            />
+            {busy ? (
+              <button
+                type="button"
+                onClick={() => abortRef.current?.abort()}
+                aria-label="Stop"
+                className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground"
+              >
+                <Square className="size-4" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() && images.length === 0}
+                aria-label={mode === "chat" ? "Send message" : "Build app"}
+                className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+              >
+                {mode === "chat" ? <ArrowUp className="size-5" /> : <Wand2 className="size-5" />}
+              </button>
+            )}
+          </div>
         </form>
+
       </div>
 
       {deployOpen && project && (
