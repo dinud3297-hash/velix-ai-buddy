@@ -618,27 +618,74 @@ function VelixApp() {
             e.preventDefault();
             submit();
           }}
-          className="mx-auto flex w-full max-w-7xl items-end gap-2 px-4 py-3"
+          className="mx-auto w-full max-w-7xl px-4 py-3"
         >
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
+          {mode === "chat" && images.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {images.map((src, i) => (
+                <div key={src.slice(-24) + i} className="relative">
+                  <img
+                    src={src}
+                    alt={`Attachment ${i + 1}`}
+                    className="size-16 rounded-xl border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove image"
+                    onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-secondary text-secondary-foreground shadow"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void addImages(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {mode === "chat" && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label="Upload or scan a photo"
+                title="Upload / scan a photo"
+                className="flex size-11 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ImagePlus className="size-5" />
+              </button>
+            )}
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder={
+                mode === "chat"
+                  ? images.length
+                    ? "Ask about the photo, or send to scan it…"
+                    : "Message Velix AI…"
+                  : project
+                    ? "Describe a change — Velix rebuilds it live…"
+                    : "Describe the app you want to build…"
               }
-            }}
-            rows={1}
-            placeholder={
-              mode === "chat"
-                ? "Message Velix AI…"
-                : project
-                  ? "Describe a change — Velix rebuilds it live…"
-                  : "Describe the app you want to build…"
-            }
-            className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
-          />
+              className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
+            />
+
           {busy ? (
             <button
               type="button"
