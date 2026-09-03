@@ -174,14 +174,37 @@ function VelixApp() {
     return data.content;
   }, []);
 
+  function readAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Could not read the image."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function addImages(list: FileList | null) {
     if (!list?.length) return;
-    const picked = Array.from(list).slice(0, 4 - images.length);
-    const encoded = await Promise.all(
-      picked.filter((f) => f.type.startsWith("image/")).map(toCompressedDataUrl),
-    );
-    setImages((prev) => [...prev, ...encoded].slice(0, 4));
+    const picked = Array.from(list)
+      .filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|heic)$/i.test(f.name))
+      .slice(0, 4 - images.length);
+    if (picked.length === 0) return;
+    try {
+      const encoded = await Promise.all(
+        picked.map(async (f) => {
+          try {
+            return await toCompressedDataUrl(f);
+          } catch {
+            return await readAsDataUrl(f);
+          }
+        }),
+      );
+      setImages((prev) => [...prev, ...encoded.filter((u) => u.startsWith("data:image"))].slice(0, 4));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not attach that image.");
+    }
   }
+
 
   async function sendChat(text: string) {
     const content = text.trim();
