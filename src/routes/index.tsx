@@ -685,27 +685,28 @@ function VelixApp() {
               }
               className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
             />
-
-          {busy ? (
-            <button
-              type="button"
-              onClick={() => abortRef.current?.abort()}
-              aria-label="Stop"
-              className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground"
-            >
-              <Square className="size-4" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              aria-label={mode === "chat" ? "Send message" : "Build app"}
-              className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
-            >
-              {mode === "chat" ? <ArrowUp className="size-5" /> : <Wand2 className="size-5" />}
-            </button>
-          )}
+            {busy ? (
+              <button
+                type="button"
+                onClick={() => abortRef.current?.abort()}
+                aria-label="Stop"
+                className="flex size-11 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground"
+              >
+                <Square className="size-4" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() && images.length === 0}
+                aria-label={mode === "chat" ? "Send message" : "Build app"}
+                className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+              >
+                {mode === "chat" ? <ArrowUp className="size-5" /> : <Wand2 className="size-5" />}
+              </button>
+            )}
+          </div>
         </form>
+
       </div>
 
       {deployOpen && project && (
